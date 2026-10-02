@@ -1,0 +1,68 @@
+# Crop & Fertilizer Recommendation using Naive Bayes
+import pandas as pd, numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.naive_bayes import GaussianNB
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
+# 1. Load dataset
+df = pd.read_csv("Crop_recommendation.csv")
+print("Dataset shape :", df.shape)
+print("Missing values:", int(df.isnull().sum().sum()))
+print("Number of crops (classes):", df['label'].nunique())
+print(df.head())
+
+# 2. Features and target
+X = df[['N', 'P', 'K', 'temperature', 'humidity', 'ph', 'rainfall']]
+y = df['label']
+
+# 3. Train / test split (80 : 20)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y)
+
+# 4. Train Gaussian Naive Bayes
+model = GaussianNB()
+model.fit(X_train, y_train)
+
+# 5. Evaluate
+y_pred = model.predict(X_test)
+print("\nAccuracy:", round(accuracy_score(y_test, y_pred) * 100, 2), "%")
+print("\nClassification Report:\n", classification_report(y_test, y_pred))
+
+cm = confusion_matrix(y_test, y_pred, labels=model.classes_)
+plt.figure(figsize=(9, 8))
+plt.imshow(cm, cmap='Blues'); plt.colorbar()
+plt.xticks(range(len(model.classes_)), model.classes_, rotation=90, fontsize=7)
+plt.yticks(range(len(model.classes_)), model.classes_, fontsize=7)
+plt.xlabel('Predicted crop'); plt.ylabel('Actual crop'); plt.title('Confusion Matrix - Naive Bayes')
+plt.tight_layout(); plt.savefig('confusion_matrix.png', dpi=150)
+
+# 6. Ideal nutrient level (N, P, K) of every crop from the training data
+ideal = df.groupby('label')[['N', 'P', 'K']].mean()
+
+def recommend(N, P, K, temperature, humidity, ph, rainfall):
+    sample = pd.DataFrame([[N, P, K, temperature, humidity, ph, rainfall]], columns=X.columns)
+    probs = model.predict_proba(sample)[0]
+    top3 = np.argsort(probs)[::-1][:3]
+    crop = model.classes_[top3[0]]
+
+    print("\nSoil / weather input :", dict(zip(X.columns, sample.iloc[0])))
+    print("Recommended crop     :", crop.upper())
+    print("Top-3 probabilities  :",
+          ", ".join(f"{model.classes_[i]} ({probs[i]*100:.1f}%)" for i in top3))
+
+    # Fertilizer recommendation: compare soil NPK with ideal NPK of the predicted crop
+    fert = {'N': 'Urea (nitrogen)', 'P': 'DAP / Single Super Phosphate (phosphorus)',
+            'K': 'Muriate of Potash - MOP (potassium)'}
+    advice = []
+    for nutrient, actual in zip(['N', 'P', 'K'], [N, P, K]):
+        gap = ideal.loc[crop, nutrient] - actual
+        if gap > 10:
+            advice.append(f"{nutrient} is low by {gap:.0f} kg/ha -> apply {fert[nutrient]}")
+    print("Fertilizer advice    :")
+    print("   " + ("\n   ".join(advice) if advice else "Soil nutrients are adequate, no extra fertilizer needed"))
+
+# 7. Test the recommender with new samples
+recommend(90, 42, 43, 20.9, 82.0, 6.5, 202.9)   # sample 1: nutrient-rich soil
+recommend(60, 35, 28, 24.0, 82.0, 6.4, 225.0)   # sample 2: nutrient-poor soil
+recommend(85, 30, 35, 22.4, 65.0, 6.2, 85.0)    # sample 3: low phosphorus
